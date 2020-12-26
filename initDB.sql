@@ -81,33 +81,33 @@ CREATE TABLE "Employees" (
   "ReportsTo" int
 );
 
-ALTER TABLE "Clients" ADD FOREIGN KEY ("PaymentDetailsId") REFERENCES "PaymentDetails" ("PaymentDetailsId") ON DELETE CASCADE;
+ALTER TABLE "Clients" ADD FOREIGN KEY ("PaymentDetailsId") REFERENCES "PaymentDetails" ("PaymentDetailsId");
 
-ALTER TABLE "RealEstate" ADD FOREIGN KEY ("ClientId") REFERENCES "Clients" ("ClientId") ON DELETE CASCADE;
+ALTER TABLE "RealEstate" ADD FOREIGN KEY ("ClientId") REFERENCES "Clients" ("ClientId");
 
-ALTER TABLE "PersonalAccounts" ADD FOREIGN KEY ("RealEstateId") REFERENCES "RealEstate" ("RealEstateId") ON DELETE CASCADE;
+ALTER TABLE "PersonalAccounts" ADD FOREIGN KEY ("RealEstateId") REFERENCES "RealEstate" ("RealEstateId");
 
-ALTER TABLE "PersonalAccounts" ADD FOREIGN KEY ("ClientId") REFERENCES "Clients" ("ClientId") ON DELETE CASCADE;
+ALTER TABLE "PersonalAccounts" ADD FOREIGN KEY ("ClientId") REFERENCES "Clients" ("ClientId");
 
-ALTER TABLE "PersonalAccounts" ADD FOREIGN KEY ("EnergyCounterId") REFERENCES "EnergyCounters" ("EnergyCounterId") ON DELETE CASCADE;
+ALTER TABLE "PersonalAccounts" ADD FOREIGN KEY ("EnergyCounterId") REFERENCES "EnergyCounters" ("EnergyCounterId");
 
-ALTER TABLE "MonthlyInvoices" ADD FOREIGN KEY ("CreatedBy") REFERENCES "Employees" ("EmployeeId") ON DELETE CASCADE;
+ALTER TABLE "MonthlyInvoices" ADD FOREIGN KEY ("CreatedBy") REFERENCES "Employees" ("EmployeeId");
 
-ALTER TABLE "MonthlyInvoices" ADD FOREIGN KEY ("RealEstateId") REFERENCES "RealEstate" ("RealEstateId") ON DELETE CASCADE;
+ALTER TABLE "MonthlyInvoices" ADD FOREIGN KEY ("RealEstateId") REFERENCES "RealEstate" ("RealEstateId");
 
-ALTER TABLE "MonthlyInvoices" ADD FOREIGN KEY ("PaymentDetailsId") REFERENCES "PaymentDetails" ("PaymentDetailsId") ON DELETE CASCADE;
+ALTER TABLE "MonthlyInvoices" ADD FOREIGN KEY ("PaymentDetailsId") REFERENCES "PaymentDetails" ("PaymentDetailsId");
 
-ALTER TABLE "MonthlyInvoices" ADD FOREIGN KEY ("EnergyCounterId") REFERENCES "EnergyCounters" ("EnergyCounterId") ON DELETE CASCADE;
+ALTER TABLE "MonthlyInvoices" ADD FOREIGN KEY ("EnergyCounterId") REFERENCES "EnergyCounters" ("EnergyCounterId");
 
-ALTER TABLE "Offices" ADD FOREIGN KEY ("CityId") REFERENCES "Cities" ("CityId") ON DELETE CASCADE;
+ALTER TABLE "Offices" ADD FOREIGN KEY ("CityId") REFERENCES "Cities" ("CityId");
 
-ALTER TABLE "ClientsOffices" ADD FOREIGN KEY ("OfficeId") REFERENCES "Offices" ("OfficeId") ON DELETE CASCADE;
+ALTER TABLE "ClientsOffices" ADD FOREIGN KEY ("OfficeId") REFERENCES "Offices" ("OfficeId");
 
-ALTER TABLE "ClientsOffices" ADD FOREIGN KEY ("ClientId") REFERENCES "Clients" ("ClientId") ON DELETE CASCADE;
+ALTER TABLE "ClientsOffices" ADD FOREIGN KEY ("ClientId") REFERENCES "Clients" ("ClientId");
 
-ALTER TABLE "Employees" ADD FOREIGN KEY ("OfficeId") REFERENCES "Offices" ("OfficeId") ON DELETE CASCADE;
+ALTER TABLE "Employees" ADD FOREIGN KEY ("OfficeId") REFERENCES "Offices" ("OfficeId");
 
-ALTER TABLE "Employees" ADD FOREIGN KEY ("ReportsTo") REFERENCES "Employees" ("EmployeeId") ON DELETE CASCADE;
+ALTER TABLE "Employees" ADD FOREIGN KEY ("ReportsTo") REFERENCES "Employees" ("EmployeeId");
 
 INSERT INTO "Cities" ("Name")
 SELECT 'Kiev'
@@ -239,6 +239,33 @@ UNION ALL SELECT date '02-04-2016', 935, date '02-05-2016', 10, 10, 10, 10
 UNION ALL SELECT date '05-09-2019', 564, date '05-11-2019', 4, 11, 5, 11
 UNION ALL SELECT date '06-24-2017', 784, date '07-5-2017', 5, 12, 3, 12;
 
+CREATE TABLE "InvoiceArchive" (
+  "InvoiceId" SERIAL PRIMARY KEY,
+  "CreatedAt" date,
+  "EnergyUsed" int,
+  "Total" money GENERATED ALWAYS AS ( "EnergyUsed" * 2.25 ) STORED,
+  "PaymentDate" date,
+  "CreatedBy" int,
+  "RealEstateId" int,
+  "PaymentDetailsId" int,
+  "EnergyCounterId" int,
+  "DeletionDateTime" timestamp,
+  "DeletedBy" varchar(255)
+);
+
+CREATE FUNCTION check_deleted_invoice() RETURNS trigger AS $$
+BEGIN
+  INSERT INTO "InvoiceArchive"("CreatedAt", "EnergyUsed", "PaymentDate", "CreatedBy", "RealEstateId",
+                                "PaymentDetailsId", "EnergyCounterId", "DeletionDateTime", "DeletedBy")
+  VALUES (OLD."CreatedAt", OLD."EnergyUsed", OLD."PaymentDate", OLD."CreatedBy",
+                                        OLD."RealEstateId", OLD."PaymentDetailsId", OLD."EnergyCounterId", now(), current_user);
+  RETURN NEW;
+END
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER CheckDeletedInvoice AFTER DELETE ON "MonthlyInvoices" FOR EACH ROW
+  EXECUTE PROCEDURE check_deleted_invoice();
+
 CREATE OR REPLACE FUNCTION "GetTables"()
 RETURNS TABLE(
   "TableName" varchar
@@ -255,3 +282,67 @@ BEGIN
   EXECUTE format('DELETE FROM "%s" WHERE "%s" = %s;', tableName, columnName, id);
 END
 $$ LANGUAGE plpgsql;
+
+CREATE VIEW "TransactionInfo" AS
+    SELECT MI."Total", PD."CardNumber", PD."ExpirationDate", PD."Bank"  FROM "MonthlyInvoices" MI
+    JOIN "PaymentDetails" PD on MI."PaymentDetailsId" = PD."PaymentDetailsId";
+
+CREATE VIEW "PersonalAssistant" AS
+    SELECT concat(E."FirstName", ' ',  E."LastName") AS "Employee",
+           concat(C."FirstName", ' ', C."LastName") AS "Client"
+    FROM "Employees" E
+    JOIN "ClientsOffices" CO ON E."OfficeId" = CO."OfficeId"
+    JOIN "Clients" C on CO."ClientId" = C."ClientId";
+
+CREATE VIEW "ClientsWithoutRealEstate" AS
+    SELECT * FROM "Clients"
+    WHERE "ClientId" NOT IN (SELECT "ClientId"
+        FROM "RealEstate"
+        GROUP BY "ClientId");
+SELECT * FROM "ClientsWithoutRealEstate"
+CREATE OR REPLACE FUNCTION last_client_invoice(clientId int)
+RETURNS TABLE(
+    "Client" text,
+    "Total" money,
+    "isPaid" bool
+)
+AS $$
+DECLARE
+BEGIN
+    RETURN QUERY SELECT concat("FirstName", ' ', "LastName"), MI."Total",
+    CASE
+    WHEN MI."PaymentDate" IS NULL THEN FALSE
+    ELSE TRUE
+    END
+    FROM "MonthlyInvoices" MI
+    JOIN "Clients" C on MI."PaymentDetailsId" = C."PaymentDetailsId"
+    WHERE "ClientId" = clientId;
+END $$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION income_by_period(fromDate date, toDate date DEFAULT NULL)
+RETURNS money
+AS $$
+DECLARE
+    result money;
+BEGIN
+    IF toDate IS NULL THEN
+        SELECT SUM("Total") INTO result FROM "MonthlyInvoices"
+        WHERE "PaymentDate" >= fromDate;
+    ELSE
+        SELECT SUM("Total") INTO result FROM "MonthlyInvoices"
+        WHERE "PaymentDate" BETWEEN fromDate AND toDate;
+    END IF;
+
+    IF result IS NULL THEN
+        RETURN 0;
+    END IF;
+
+    RETURN result;
+END $$ LANGUAGE plpgsql;
+
+CREATE USER Application WITH PASSWORD '123';
+GRANT CONNECT ON DATABASE "ElectricityUsersData" TO application;
+GRANT SELECT, INSERT, UPDATE, DELETE
+    ON ALL TABLES IN SCHEMA public TO application;
+GRANT USAGE, SELECT, UPDATE
+    ON ALL SEQUENCES IN SCHEMA public TO application;
