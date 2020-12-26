@@ -3,10 +3,10 @@ const { Pool } = require('pg');
 let lastResponse = 'OK';
 
 const pool = new Pool({
-  user: 'admin',
+  user: 'application',
   host: 'localhost',
   database: 'ElectricityUsers',
-  password: 'admin',
+  password: '123',
   port: 5432,
 });
 
