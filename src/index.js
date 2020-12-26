@@ -144,9 +144,9 @@ app.component('filter-selector', {
 
   template: `<div class="filter-chooser dialog-window" v-show="isVisible">
                 <i class="fas fa-times close-form-button" @click="close"></i>
-                <div class="centered"><button @click="$emit('set', '')">Disable</button></div>
-                <div class="centered"><input type="text" v-model="firstParam" @input="setFilter"></div>
-                <div class="centered"><input type="text" v-model="secondParam" v-show="filter === 'between'" @input="setFilter"></div>
+                <h2>Filter</h2>
+                <div class="centered"><input type="text" v-model="firstParam" @input="setFilter" placeholder="Value"></div>
+                <div class="centered"><input type="text" v-model="secondParam" v-show="filter === 'between'" @input="setFilter" placeholder="Second value"></div>
                 <div class="centered">
                   <select v-model="filter"  @change="setFilter">
                     <option disabled>Choose a filter</option>
@@ -156,6 +156,7 @@ app.component('filter-selector', {
                     <option value="between">Between</option>
                   </select>
                 </div>
+                <div class="centered"><button @click="$emit('set', '')">Disable</button></div>
               </div>`,
 });
 
